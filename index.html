@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>iPadOS Web Viewer</title>
+    <style>
+        :root {
+            /* Papel de parede */
+            --wallpaper: url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=2670&auto=format&fit=crop'); 
+            --frame-color: #121212;
+            --system-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --accent-color: #007aff;
+            --safe-top: env(safe-area-inset-top, 20px);
+            --safe-bottom: env(safe-area-inset-bottom, 20px);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: var(--system-font); user-select: none; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background-color: #000; /* Fundo preto para fora do frame no PC */
+            height: 100vh; width: 100vw;
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden;
+        }
+
+        /* --- DEVICE FRAME (O container principal) --- */
+        .device-frame {
+            position: relative;
+            background-color: var(--frame-color);
+            /* Lógica Desktop: Mantém proporção de Tablet */
+            width: min(100vw, 133.33vh);
+            height: min(100vh, 75vw);
+            border: 12px solid var(--frame-color);
+            border-radius: 24px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            z-index: 1;
+            display: flex;
+            transition: all 0.3s ease;
+        }
+
+        .camera-dot {
+            position: absolute; top: 50%; left: -6px; transform: translateY(-50%);
+            width: 8px; height: 8px; background: #222; border-radius: 50%;
+            box-shadow: inset 0 0 2px rgba(255,255,255,0.1); z-index: 10;
+        }
+
+        /* --- SCREEN --- */
+        .screen {
+            width: 100%; height: 100%;
+            background: var(--wallpaper) no-repeat center center/cover;
+            position: relative; overflow: hidden;
+            border-radius: 18px; display: flex; flex-direction: column;
+        }
+        .screen::after { content: ''; position: absolute; inset: 0; background: rgba(0,0,0,0.15); pointer-events: none; }
+
+        /* --- STATUS BAR --- */
+        .status-bar {
+            height: 32px; width: 100%; display: flex; justify-content: space-between; align-items: center;
+            padding: 0 15px; color: white; font-size: 13px; font-weight: 600; z-index: 20; position: absolute; top: 0;
+            backdrop-filter: blur(2px);
+            padding-top: 0; /* Ajuste fino */
+        }
+        
+        .battery-icon {
+            width: 25px; height: 12px; border: 1px solid rgba(255,255,255,0.4); border-radius: 3px;
+            padding: 1px; position: relative; display: flex; align-items: center; margin-right: 3px;
+        }
+        .battery-icon::after {
+            content: ''; position: absolute; right: -4px; top: 50%; transform: translateY(-50%);
+            width: 2px; height: 4px; background: rgba(255,255,255,0.4);
+            border-top-right-radius: 2px; border-bottom-right-radius: 2px;
+        }
+        .battery-level {
+            height: 100%; width: 100%; background-color: #fff; border-radius: 1px;
+            transition: width 0.5s ease, background-color 0.5s;
+        }
+
+        /* --- LOCK SCREEN --- */
+        .lock-screen {
+            position: absolute; inset: 0; z-index: 50;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+            padding-top: 15%; color: white;
+            transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s;
+            background: rgba(0,0,0,0.01); backdrop-filter: blur(0px);
+        }
+        /* Responsividade do relógio via clamp para não quebrar no celular */
+        .lock-time { 
+            font-size: clamp(4rem, 15vw, 6rem); 
+            font-weight: 700; letter-spacing: -2px; line-height: 1; 
+            text-shadow: 0 4px 30px rgba(0,0,0,0.3); 
+            text-align: center;
+        }
+        .lock-date { font-size: 1.2rem; margin-bottom: 10px; text-align: center;}
+        
+        .unlock-hint {
+            margin-top: auto; margin-bottom: 30px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+            opacity: 0.8; animation: pulseHint 2s infinite; cursor: pointer;
+            padding-bottom: var(--safe-bottom);
+        }
+        .home-bar-lock { width: 140px; height: 5px; background: white; border-radius: 10px; }
+        @keyframes pulseHint { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+        .lock-screen.unlocked { transform: translateY(-100%); opacity: 0; backdrop-filter: blur(15px); }
+
+        /* --- HOME SCREEN --- */
+        .home-screen {
+            flex: 1; 
+            padding: 50px 20px 20px; /* Reduzi padding lateral para caber melhor no mobile */
+            display: flex; flex-direction: column;
+            z-index: 10; opacity: 0; transform: scale(0.98); transition: all 0.5s ease 0.2s;
+            height: 100%;
+        }
+        .lock-screen.unlocked ~ .home-screen { opacity: 1; transform: scale(1); }
+
+        .app-grid {
+            display: grid; 
+            grid-template-columns: repeat(6, 1fr); 
+            gap: 30px 20px;
+            width: 100%; justify-items: center; align-content: start; flex: 1; overflow-y: auto;
+            padding-bottom: 20px;
+        }
+
+        .app-item {
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+            cursor: pointer; transition: transform 0.2s; width: 70px;
+        }
+        .app-item:active { transform: scale(0.92); opacity: 0.8; }
+        
+        .app-icon {
+            width: 64px; height: 64px; 
+            border-radius: 14px; 
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); 
+            position: relative; overflow: hidden;
+            background: #fff;
+        }
+        
+        .app-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        .app-label {
+            color: white; font-size: 11px; font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+            text-align: center; white-space: nowrap; width: 100%; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* --- DOCK --- */
+        .dock-container { 
+            margin-top: auto; 
+            margin-bottom: 10px; 
+            display: flex; justify-content: center; width: 100%; 
+            padding-bottom: var(--safe-bottom);
+        }
+        .dock {
+            height: 90px; background: rgba(255,255,255,0.25); backdrop-filter: blur(25px); border-radius: 30px;
+            padding: 0 20px; display: flex; align-items: center; gap: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.15);
+            max-width: 95%; /* Impede que estoure a tela no mobile */
+        }
+        .dock .app-icon { width: 58px; height: 58px; }
+
+        /* --- APP WINDOW --- */
+        .app-window {
+            position: absolute; inset: 0; background: #000; z-index: 60;
+            transform: scale(0.9); opacity: 0; pointer-events: none;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; flex-direction: column; border-radius: 18px; overflow: hidden;
+        }
+        .app-window.active { transform: scale(1); opacity: 1; pointer-events: all; }
+
+        .window-header {
+            height: 44px; padding: 0 15px; display: flex; align-items: center; justify-content: space-between;
+            background: #f2f2f7; border-bottom: 1px solid #d1d1d6;
+            flex-shrink: 0; /* Garante que o header não encolha */
+            padding-top: var(--safe-top); /* Espaço extra se tiver notch */
+            box-sizing: content-box; /* Para o padding-top somar à altura */
+        }
+        .btn-close {
+            color: #007aff; font-size: 16px; font-weight: 600; background: none; border: none; cursor: pointer; padding: 10px; /* Touch target maior */
+        }
+        .window-title { font-weight: 600; font-size: 15px; color: #000; }
+
+        .window-content { flex: 1; width: 100%; height: 100%; background: #fff; position: relative; overflow: hidden; }
+        .window-content iframe { width: 100%; height: 100%; border: none; display: block; }
+        
+        .home-indicator-app {
+            position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+            width: 140px; height: 5px; background: #000; border-radius: 10px; opacity: 0.3; pointer-events: none;
+            z-index: 100;
+            margin-bottom: var(--safe-bottom);
+        }
+
+        /* --- SLIDE VIEWER --- */
+        .slide-viewer {
+            width: 100%; height: 100%; 
+            display: flex; flex-direction: column;
+            background: #202124; 
+            position: relative; overflow: hidden;
+        }
+        
+        .slide-content-wrapper {
+            flex: 1; 
+            width: 100%;
+            display: flex; justify-content: center; align-items: center;
+            position: relative; overflow: hidden;
+        }
+
+        .slide-image {
+            max-width: 100%; max-height: 100%; object-fit: contain;
+            animation: fadeInSlide 0.3s ease;
+        }
+        @keyframes fadeInSlide { from { opacity: 0.8; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+        
+        .slide-controls-bar {
+            height: 60px; /* Aumentado para mobile */
+            width: 100%;
+            background: #ffffff;
+            border-top: 1px solid #e0e0e0;
+            display: flex; align-items: center;
+            padding: 0 16px; gap: 8px;
+            z-index: 20;
+            padding-bottom: var(--safe-bottom); /* Respeita a área segura inferior */
+            box-sizing: content-box;
+        }
+
+        .slide-btn {
+            background: transparent; border: none; 
+            color: #5f6368; font-size: 24px; cursor: pointer;
+            width: 44px; height: 44px; /* Touch target maior */
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 50%; transition: background 0.2s;
+            outline: none;
+        }
+        .slide-btn:hover { background: rgba(0,0,0,0.08); color: #202124; }
+
+        .slide-counter-box {
+            background: #f1f3f4;
+            color: #3c4043;
+            font-size: 14px; font-weight: 500;
+            padding: 6px 14px;
+            border-radius: 4px;
+            min-width: 50px; text-align: center;
+            margin: 0 4px;
+            cursor: default;
+        }
+
+        /* --- SHUTDOWN --- */
+        .shutdown-overlay {
+            position: absolute; inset: 0; background: #000; z-index: 200;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 1.5s ease; border-radius: 18px;
+        }
+        .shutdown-overlay.visible { opacity: 1; pointer-events: all; }
+        .low-battery-icon { font-size: 80px; color: #ff3b30; animation: fadeBlink 2s infinite; }
+        @keyframes fadeBlink { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+
+        /* ========================================= */
+        /* MEDIA QUERIES PARA MOBILE */
+        /* ========================================= */
+        @media (max-width: 768px) {
+            /* Remove a moldura e faz tela cheia */
+            .device-frame {
+                width: 100vw;
+                height: 100vh; /* Altura dinâmica do mobile */
+                height: 100dvh; /* Altura real moderna para lidar com barras do navegador */
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
+            }
+
+            /* Esconde a câmera falsa, o usuário já tem uma */
+            .camera-dot { display: none; }
+
+            /* Remove bordas internas */
+            .screen { border-radius: 0; }
+            .app-window { border-radius: 0; }
+            .shutdown-overlay { border-radius: 0; }
+
+            /* Ajusta a grade para 4 colunas (padrão iOS mobile) */
+            .app-grid {
+                grid-template-columns: repeat(4, 1fr);
+                gap: 20px 10px;
+                padding-top: 20px;
+            }
+
+            /* Ajusta tamanho dos ícones */
+            .app-item { width: 60px; }
+            .app-icon { width: 56px; height: 56px; font-size: 26px; border-radius: 12px; }
+            .app-label { font-size: 10px; }
+
+            /* Dock responsiva */
+            .dock {
+                height: 80px;
+                padding: 0 15px;
+                gap: 12px;
+                border-radius: 24px;
+                margin-bottom: 5px;
+            }
+            .dock .app-icon { width: 50px; height: 50px; }
+
+            /* Barra de status ajustada para o topo real */
+            .status-bar {
+                height: 44px; /* Mais alto para facilitar toque e visualização */
+                padding-top: var(--safe-top);
+                align-items: flex-end;
+                padding-bottom: 8px;
+            }
+
+            /* Lock screen layout */
+            .lock-screen { padding-top: 25%; }
+            .lock-time { font-size: 5rem; }
+        }
+
+        /* Ajustes para telas MUITO pequenas (iPhone SE, etc) */
+        @media (max-width: 380px) {
+            .app-grid { grid-template-columns: repeat(4, 1fr); gap: 15px 5px; }
+            .app-icon { width: 50px; height: 50px; }
+            .dock .app-icon { width: 45px; height: 45px; }
+            .lock-time { font-size: 4rem; }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="device-frame">
+        <div class="camera-dot"></div>
+
+        <div class="screen">
+            <div class="status-bar">
+                <span class="sb-date" id="sb-date">--</span>
+                <div class="sb-right" style="display: flex; gap: 10px; align-items: center;">
+                    <div class="battery-icon">
+                        <div class="battery-level" id="battery-fill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lock-screen" id="lock-screen" onclick="unlockDevice()">
+                <div class="lock-date" id="lock-date">--</div>
+                <div class="lock-time" id="lock-time">--:--</div>
+                <div class="unlock-hint">
+                    <span style="font-size: 14px; font-weight: 500;">Toque para desbloquear</span>
+                    <div class="home-bar-lock"></div>
+                </div>
+            </div>
+
+            <div class="home-screen">
+                <div class="app-grid" id="app-grid">
+                    <!-- Apps principais via JS -->
+                </div>
+                
+                <div class="dock-container">
+                    <div class="dock" id="dock-grid">
+                        <!-- Apps da Dock via JS -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="app-window" id="app-window">
+                <div class="window-header">
+                    <button class="btn-close" onclick="closeApp()">Concluído</button>
+                    <span class="window-title" id="window-title">App</span>
+                    <div style="width: 50px;"></div>
+                </div>
+                
+                <div class="window-content" id="window-content"></div>
+                <!-- Home indicator -->
+                <div class="home-indicator-app"></div>
+            </div>
+
+            <div class="shutdown-overlay" id="shutdown-overlay">
+                <div class="low-battery-icon">🪫</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // ============================================
+    // CONFIGURAÇÃO DOS APPS
+    // ============================================
+
+    const appsData = [
+        {
+            title: "Notas",
+            image: "https://upload.wikimedia.org/wikipedia/commons/e/ed/Apple_Notes_%28iOS%29.png",
+            fallbackIcon: "📝",
+            url: "https://www.canva.com/design/DAG-tLXreCY/WaXAHw2jFRejL_Szb2ES9g/view?embed" 
+        },
+        {
+            title: "Clash Royale",
+            image: "https://cdnb.artstation.com/p/assets/images/images/029/816/241/medium/brice-laville-saint-martin-clash-royale-app-icon-2020.jpg?1598728017",
+            fallbackIcon: "⚔️",
+            url: ""
+        },
+        {
+            title: "Netflix",
+            image: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Netflix_icon.svg/500px-Netflix_icon.svg.png?20220806170125", 
+            fallbackIcon: "🍿",
+            slides: [
+                "./imagens/1.png",
+                "./imagens/2.png",
+                "./imagens/3.png",
+                "./imagens/4.png"
+            ]
+        },
+        {
+            title: "Instagram",
+            image: "https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png", 
+            fallbackIcon: "📸",
+            url: ""
+        },
+        {
+            title: "Notion",
+            image: "https://upload.wikimedia.org/wikipedia/commons/4/45/Notion_app_logo.png",
+            fallbackIcon: "📓",
+            url: "" 
+        }
+    ];
+      
+    const dockData = [
+        { title: "Mensagens", image: "https://upload.wikimedia.org/wikipedia/commons/5/51/IMessage_logo.svg", fallbackIcon: "💬" },
+        { title: "Safari", image: "https://upload.wikimedia.org/wikipedia/commons/5/52/Safari_browser_logo.svg", fallbackIcon: "🧭" },
+        { title: "Mail", image: "https://upload.wikimedia.org/wikipedia/commons/4/4e/Mail_%28iOS%29.svg", fallbackIcon: "✉️" },
+        { title: "Música", image: "https://upload.wikimedia.org/wikipedia/commons/5/5f/Apple_Music_icon.svg", fallbackIcon: "🎵" }
+    ];
+
+    // ==============================
+    // LÓGICA DO SISTEMA
+    // ==============================
+
+    let isLocked = true;
+    let currentSlideIndex = 0;
+    let currentAppSlides = [];
+    const totalApps = appsData.length;
+    const visitedApps = new Set(); 
+
+    // Elementos DOM
+    const lockScreen = document.getElementById('lock-screen');
+    const gridEl = document.getElementById('app-grid');
+    const dockEl = document.getElementById('dock-grid');
+    const appWindow = document.getElementById('app-window');
+    const winTitle = document.getElementById('window-title');
+    const winContent = document.getElementById('window-content');
+    const batteryFill = document.getElementById('battery-fill');
+    const shutdownOverlay = document.getElementById('shutdown-overlay');
+
+    // Helper: Ícone HTML
+    function createIconHTML(app) {
+        if (app.image && app.image.trim() !== "") {
+            return `<img src="${app.image}" alt="${app.title}" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"> <span style="display:none;">${app.fallbackIcon}</span>`;
+        } else {
+            return `<span>${app.fallbackIcon}</span>`;
+        }
+    }
+
+    // Render Grid
+    appsData.forEach((app, index) => {
+        const item = document.createElement('div');
+        item.className = 'app-item';
+        item.innerHTML = `<div class="app-icon">${createIconHTML(app)}</div><div class="app-label">${app.title}</div>`;
+        item.onclick = () => openApp(index);
+        gridEl.appendChild(item);
+    });
+
+    // Render Dock
+    dockData.forEach((app) => {
+        const item = document.createElement('div');
+        item.className = 'app-item'; 
+        item.style.cursor = 'default';
+        item.innerHTML = `<div class="app-icon">${createIconHTML(app)}</div>`;
+        dockEl.appendChild(item);
+    });
+
+    // Relógio
+    function updateTime() {
+        const now = new Date();
+        const timeString = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        document.getElementById('lock-time').innerText = timeString;
+        
+        const dateOptions = { weekday: 'long', month: 'long', day: 'numeric' };
+        document.getElementById('lock-date').innerText = now.toLocaleDateString('pt-BR', dateOptions);
+        
+        const shortDate = now.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' });
+        document.getElementById('sb-date').innerText = shortDate.replace('.', '');
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+
+    function unlockDevice() {
+        isLocked = false;
+        lockScreen.classList.add('unlocked');
+    }
+
+    function openApp(index) {
+        if(isLocked) return;
+        const app = appsData[index];
+        winTitle.innerText = app.title;
+
+        if (app.slides && app.slides.length > 0) {
+            currentSlideIndex = 0;
+            currentAppSlides = app.slides;
+            renderSlideViewer();
+        } else {
+            winContent.innerHTML = `<iframe src="${app.url}" frameborder="0" allowfullscreen></iframe>`;
+        }
+
+        appWindow.classList.add('active');
+
+        if (!visitedApps.has(index)) {
+            visitedApps.add(index);
+            updateBattery();
+        }
+    }
+
+    // Slides
+    function renderSlideViewer() {
+        winContent.innerHTML = `
+            <div class="slide-viewer">
+                <div class="slide-content-wrapper">
+                    <img id="active-slide-img" class="slide-image" src="" alt="Slide">
+                </div>
+                <div class="slide-controls-bar">
+                    <button class="slide-btn" onclick="changeSlide(-1)">❮</button>
+                    <div class="slide-counter-box" id="slide-counter">1</div>
+                    <button class="slide-btn" onclick="changeSlide(1)">❯</button>
+                </div>
+            </div>
+        `;
+        updateSlideImage();
+    }
+
+    function changeSlide(direction) {
+        currentSlideIndex += direction;
+        if (currentSlideIndex < 0) currentSlideIndex = currentAppSlides.length - 1;
+        if (currentSlideIndex >= currentAppSlides.length) currentSlideIndex = 0;
+        updateSlideImage();
+    }
+
+    function updateSlideImage() {
+        const imgEl = document.getElementById('active-slide-img');
+        const counterEl = document.getElementById('slide-counter');
+        if(imgEl && counterEl) {
+            imgEl.src = currentAppSlides[currentSlideIndex];
+            counterEl.innerText = `${currentSlideIndex + 1} / ${currentAppSlides.length}`;
+            imgEl.style.animation = 'none';
+            imgEl.offsetHeight; 
+            imgEl.style.animation = 'fadeInSlide 0.3s ease';
+        }
+    }
+
+    function closeApp() {
+        appWindow.classList.remove('active');
+        setTimeout(() => {
+            winContent.innerHTML = '';
+            currentAppSlides = [];
+            if (visitedApps.size === totalApps) setTimeout(turnOffDevice, 800); 
+        }, 500);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (!appWindow.classList.contains('active')) return;
+        if (currentAppSlides.length === 0) return;
+        if (e.key === 'ArrowRight') changeSlide(1);
+        if (e.key === 'ArrowLeft') changeSlide(-1);
+    });
+
+    function updateBattery() {
+        const appsOpened = visitedApps.size;
+        let newLevel = 100 - (appsOpened * (100 / totalApps));
+        if (newLevel < 0) newLevel = 0;
+        batteryFill.style.width = `${newLevel}%`;
+        
+        if (newLevel <= 20) batteryFill.style.backgroundColor = '#ff3b30';
+        else if (newLevel <= 50) batteryFill.style.backgroundColor = '#ffcc00';
+        else batteryFill.style.backgroundColor = '#fff';
+    }
+
+    function turnOffDevice() {
+        batteryFill.style.width = '0%';
+        shutdownOverlay.classList.add('visible');
+    }
+
+</script>
+</body>
+</html>
