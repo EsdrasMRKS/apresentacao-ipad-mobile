@@ -196,6 +196,21 @@
             background: #202124; 
             position: relative; overflow: hidden;
         }
+
+        /* --- ZONAS DE TOQUE (NOVA FUNÇÃO) --- */
+        .nav-zone {
+            position: absolute;
+            top: 0; bottom: 0;
+            width: 40%; /* Ocupa 40% da lateral da tela */
+            z-index: 50; /* Fica acima da imagem */
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent; /* Remove o flash azul padrão do mobile */
+        }
+        .nav-zone-left { left: 0; }
+        .nav-zone-right { right: 0; }
+        
+        /* Efeito visual sutil ao tocar (opcional) */
+        .nav-zone:active { background: rgba(255,255,255,0.05); }
         
         .slide-content-wrapper {
             flex: 1; 
@@ -528,6 +543,9 @@
         winContent.innerHTML = `
             <div class="slide-viewer">
                 <div class="slide-content-wrapper">
+                    <div class="nav-zone nav-zone-left" onclick="changeSlide(-1)"></div>
+                    <div class="nav-zone nav-zone-right" onclick="changeSlide(1)"></div>
+                    
                     <img id="active-slide-img" class="slide-image" src="" alt="Slide">
                 </div>
                 <div class="slide-controls-bar">
@@ -595,6 +613,7 @@
 </body>
 
 </html>
+
 
 
 
